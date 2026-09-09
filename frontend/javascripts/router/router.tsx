@@ -20,7 +20,7 @@ import {
   redirect,
 } from "react-router-dom";
 import type { EmptyObject } from "types/type_utils";
-import { CommandPalette } from "viewer/view/components/command_palette";
+import { CommandPaletteLoader } from "viewer/view/components/command_palette_loader";
 
 const { Content } = Layout;
 
@@ -136,7 +136,7 @@ const AsyncWorkflowListView = loadable<EmptyObject>(
 function RootLayout() {
   return (
     <Layout>
-      <CommandPalette />
+      <CommandPaletteLoader />
       <Navbar />
       <Content>
         <ErrorBoundary>
