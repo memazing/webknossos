@@ -1,0 +1,40 @@
+# Build our fork of WEBKNOSSOS and publish the image.
+#
+# The VM pulls this image rather than being pushed to: it has no public IP
+# and no inbound path except IAP, so a pull-based deploy needs no inbound
+# access and no credentials on the build side. See the webknossos-update
+# systemd timer on webknossos-vm.
+#
+# The Scala + frontend build is heavy; E2_HIGHCPU_32 and a 2h timeout are
+# deliberate. Upstream's own CI runs the same sbt stage targets.
+substitutions:
+  _IMAGE: us-east1-docker.pkg.dev/the-pulsar-481518-f3/cloud-run-source-deploy/webknossos
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - .github/Dockerfile.webknossos
+      - -t
+      - '${_IMAGE}:${SHORT_SHA}'
+      - -t
+      - '${_IMAGE}:latest'
+      - .
+    timeout: 5400s
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '--all-tags', '${_IMAGE}']
+
+images:
+  - '${_IMAGE}:${SHORT_SHA}'
+  - '${_IMAGE}:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_32
+  diskSizeGb: 200
+
+timeout: 7200s
