@@ -9,6 +9,16 @@ say "begin $(date -u +%FT%TZ)"
 WK_TAG=26.09.1
 DIR=/opt/webknossos
 
+# Run our own build instead of upstream's published release. Off, and it must
+# stay off until cloudbuild.yaml can actually produce an image: the Dockerfile
+# it uses only packages a pre-built tree (COPY target/universal/stage), and the
+# yarn + sbt compile phase that produces that tree is missing, so no image has
+# ever been published. The fork also carries no source changes yet -- only
+# deploy config -- so self-building would currently rebuild upstream's code
+# with extra risk and no benefit. Flip to 1 once the build works AND the fork
+# actually diverges.
+USE_OWN_IMAGE=0
+
 # ---------------------------------------------------------------- docker ---
 # Debian 12 ships neither docker-compose-plugin nor docker-compose-v2, so the
 # compose v2 plugin has to come from Docker's own repository. Errors are
@@ -40,7 +50,9 @@ say "docker ready: $(docker --version)"
 # Pull our own image. Needs roles/artifactregistry.reader on
 # webknossos-vm@ (repo-scoped is enough); the VM's cloud-platform scope
 # supplies the token via the credential helper.
-gcloud auth configure-docker us-east1-docker.pkg.dev --quiet 2>&1 | tail -2
+if [ "$USE_OWN_IMAGE" = "1" ]; then
+  gcloud auth configure-docker us-east1-docker.pkg.dev --quiet 2>&1 | tail -2
+fi
 
 # ------------------------------------------------------------- compose set --
 mkdir -p "$DIR"/persistent/{postgres,fossildb/data,fossildb/backup} "$DIR"/binaryData
@@ -86,9 +98,10 @@ set -a; . ./.env; set +a
 cat > docker-compose.override.yml <<'EOF'
 services:
   webknossos:
-    # our fork's build, not upstream's Docker Hub image. Tag is literal
-    # because this heredoc is quoted and .env is write-once: bump it here.
-    image: us-east1-docker.pkg.dev/the-pulsar-481518-f3/cloud-run-source-deploy/webknossos:latest
+    # Explicit on purpose: this service previously had no image override and
+    # silently inherited upstream's from docker-compose.yml. Swapped to our
+    # Artifact Registry build when USE_OWN_IMAGE=1 (see the top of this file).
+    image: scalableminds/webknossos:${DOCKER_TAG}
     ports: !override
       - "0.0.0.0:9000:9000"
     command:
@@ -115,7 +128,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
   apply-evolutions:
-    image: us-east1-docker.pkg.dev/the-pulsar-481518-f3/cloud-run-source-deploy/webknossos:latest
+    image: scalableminds/webknossos:${DOCKER_TAG}
     environment:
       - POSTGRES_URL=jdbc:postgresql://postgres/webknossos?user=postgres&password=${POSTGRES_PASSWORD}
       - PGPASSWORD=${POSTGRES_PASSWORD}
@@ -130,10 +143,16 @@ docker compose run --rm apply-evolutions 2>&1 | tail -5
 say "starting webknossos"
 docker compose up -d webknossos 2>&1 | tail -3
 
+if [ "$USE_OWN_IMAGE" = "1" ]; then
+  sed -i "s|image: scalableminds/webknossos:\${DOCKER_TAG}|image: us-east1-docker.pkg.dev/the-pulsar-481518-f3/cloud-run-source-deploy/webknossos:latest|g" docker-compose.override.yml
+  say "using our own image: us-east1-docker.pkg.dev/the-pulsar-481518-f3/cloud-run-source-deploy/webknossos:latest"
+fi
+
 # ---------------------------------------------------------- auto-update ---
 # Pull-based deploy: Cloud Build publishes :latest on a push to master, this
 # timer notices the new digest and rolls it out. Nothing is pushed to the VM,
 # so no inbound path and no build-side credentials are needed.
+if [ "$USE_OWN_IMAGE" = "1" ]; then
 cat > /usr/local/bin/webknossos-update <<'UPD'
 #!/bin/bash
 set -euo pipefail
@@ -173,6 +192,9 @@ TMR
 systemctl daemon-reload
 systemctl enable --now webknossos-update.timer
 say "auto-update timer enabled"
+else
+  say "auto-update timer skipped (USE_OWN_IMAGE=0)"
+fi
 
 for i in $(seq 1 60); do
   code=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' http://localhost:9000/api/buildinfo 2>/dev/null || echo 000)
