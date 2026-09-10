@@ -23,6 +23,14 @@ USE_OWN_IMAGE=0
 # every run (see below), unlike the secrets, which stay write-once.
 WK_PUBLIC_HOST=webknossos.memazingcloud.com
 
+# Sign in with Google (OIDC) instead of WEBKNOSSOS's own accounts. IAP already
+# restricts who can reach the host; this is what gives the app an identity so
+# users are not asked to log in a second time. The client secret is NOT here:
+# instance metadata is readable by every project Editor. It lives in
+# /opt/webknossos/.env as OIDC_CLIENT_SECRET, added by hand.
+ENABLE_OIDC=1
+OIDC_CLIENT_ID=895796082390-kckkamb44km3qqikpa97u73dsvs79mp2.apps.googleusercontent.com
+
 # ---------------------------------------------------------------- docker ---
 # Debian 12 ships neither docker-compose-plugin nor docker-compose-v2, so the
 # compose v2 plugin has to come from Docker's own repository. Errors are
@@ -98,6 +106,12 @@ sed -i "s|^PUBLIC_HOST=.*|PUBLIC_HOST=${WK_PUBLIC_HOST}|; s|^PUBLIC_URL=.*|PUBLI
 # shellcheck disable=SC1091
 set -a; . ./.env; set +a
 
+if [ "$ENABLE_OIDC" = "1" ] && [ -z "${OIDC_CLIENT_SECRET:-}" ]; then
+  say "FAIL ENABLE_OIDC=1 but OIDC_CLIENT_SECRET is missing from .env."
+  say "     Add it there by hand, then re-run. Not settable via metadata."
+  exit 1
+fi
+
 # Override, not a patched copy, so the upstream file stays pristine and a
 # version bump is a one-line change to WK_TAG.
 #  - bind 0.0.0.0 so the IAP tunnel can reach 9000 (upstream binds loopback,
@@ -145,6 +159,29 @@ services:
       - PGPASSWORD=${POSTGRES_PASSWORD}
 EOF
 
+if [ "$USE_OWN_IMAGE" = "1" ]; then
+  sed -i "s|image: scalableminds/webknossos:\${DOCKER_TAG}|image: us-east1-docker.pkg.dev/the-pulsar-481518-f3/cloud-run-source-deploy/webknossos:latest|g" docker-compose.override.yml
+  say "using our own image: us-east1-docker.pkg.dev/the-pulsar-481518-f3/cloud-run-source-deploy/webknossos:latest"
+fi
+
+if [ "$ENABLE_OIDC" = "1" ]; then
+  # ${OIDC_CLIENT_SECRET} stays literal here so compose resolves it from .env
+  # at container-create time, exactly like the other secrets in this stack.
+  sed -i "/-Dtracingstore.key=/a\\
+      - -DsingleSignOn.openIdConnect.providerUrl=https://accounts.google.com\\
+      - -DsingleSignOn.openIdConnect.clientId=${OIDC_CLIENT_ID}\\
+      - -DsingleSignOn.openIdConnect.clientSecret=\${OIDC_CLIENT_SECRET}\\
+      - -DsingleSignOn.openIdConnect.scope=openid profile email\\
+      - -Dfeatures.openIdConnectEnabled=true" docker-compose.override.yml
+  say "OIDC enabled for client ${OIDC_CLIENT_ID}"
+fi
+
+# Both blocks above rewrite the generated override, so they must run BEFORE
+# the containers are created -- editing it afterwards silently defers the
+# change to the next run. Validate the result rather than discovering a
+# malformed override as a failed start.
+docker compose config -q || { say "FAIL docker-compose.override.yml is invalid"; exit 1; }
+
 # ------------------------------------------------------------------- run ---
 say "starting datastores"
 docker compose up -d postgres fossildb redis 2>&1 | tail -3
@@ -153,11 +190,6 @@ say "applying evolutions"
 docker compose run --rm apply-evolutions 2>&1 | tail -5
 say "starting webknossos"
 docker compose up -d webknossos 2>&1 | tail -3
-
-if [ "$USE_OWN_IMAGE" = "1" ]; then
-  sed -i "s|image: scalableminds/webknossos:\${DOCKER_TAG}|image: us-east1-docker.pkg.dev/the-pulsar-481518-f3/cloud-run-source-deploy/webknossos:latest|g" docker-compose.override.yml
-  say "using our own image: us-east1-docker.pkg.dev/the-pulsar-481518-f3/cloud-run-source-deploy/webknossos:latest"
-fi
 
 # ---------------------------------------------------------- auto-update ---
 # Pull-based deploy: Cloud Build publishes :latest on a push to master, this
