@@ -116,7 +116,15 @@ fi
 # version bump is a one-line change to WK_TAG.
 #  - bind 0.0.0.0 so the IAP tunnel can reach 9000 (upstream binds loopback,
 #    which a tunnel cannot reach); the firewall admits only IAP's range
-#  - http.uri stays internal: WEBKNOSSOS's own components call each other
+#  - http.uri is the app's own PUBLIC address, not an internal one. Every
+#    consumer of it generates outward-facing URLs: the OIDC callback
+#    (AuthenticationController builds "${http.uri}/api/auth/oidc/callback"),
+#    the sitemap, email verification links, and ShortLinkController, which
+#    rejects any long link that does not start with it. Internal traffic
+#    between the components uses the *.address and *.publicUri settings
+#    instead, so pointing this at localhost did not keep anything internal --
+#    it just broke short links and made OIDC send a redirect_uri Google
+#    could not match
 #    through it, and pointing it at a proxy is what breaks IAP deployments
 #  - publicUri is localhost for M0 (tunnel); M1 changes it to the LB domain
 #  - explicit heap: the image sets none
@@ -139,7 +147,7 @@ services:
       - -Ddatastore.redis.address=redis
       - -Dslick.db.url=jdbc:postgresql://postgres/webknossos?user=postgres&password=${POSTGRES_PASSWORD}
       - -DwebKnossos.sampleOrganization.enabled=false
-      - -Dhttp.uri=http://localhost:9000
+      - -Dhttp.uri=${PUBLIC_URL}
       - -Ddatastore.publicUri=${PUBLIC_URL}
       - -Dtracingstore.publicUri=${PUBLIC_URL}
       - -Dplay.http.secret.key=${PLAY_SECRET}
