@@ -19,6 +19,10 @@ DIR=/opt/webknossos
 # actually diverges.
 USE_OWN_IMAGE=0
 
+# Public hostname. Changing it here is enough: it is reconciled into .env on
+# every run (see below), unlike the secrets, which stay write-once.
+WK_PUBLIC_HOST=webknossos.memazingcloud.com
+
 # ---------------------------------------------------------------- docker ---
 # Debian 12 ships neither docker-compose-plugin nor docker-compose-v2, so the
 # compose v2 plugin has to come from Docker's own repository. Errors are
@@ -72,8 +76,8 @@ if [ ! -f .env ]; then
   say "generating secrets"
   cat > .env <<EOF
 DOCKER_TAG=${WK_TAG}
-PUBLIC_HOST=webknossos.memazingcloud.com
-PUBLIC_URL=https://webknossos.memazingcloud.com
+PUBLIC_HOST=${WK_PUBLIC_HOST}
+PUBLIC_URL=https://${WK_PUBLIC_HOST}
 LETSENCRYPT_EMAIL=unused@memazing.com
 USER_UID=0
 USER_GID=0
@@ -84,6 +88,13 @@ TRACINGSTORE_KEY=$(openssl rand -hex 24)
 EOF
   chmod 600 .env
 fi
+
+# .env is generated only when absent, so the credentials in it survive. That
+# guard also froze the hostname: editing it in this script changed nothing on
+# a VM that already had the file, the run still reported READY, and the app
+# kept publishing links to the old name. Non-secret keys are therefore
+# reconciled on every run; secrets are not touched.
+sed -i "s|^PUBLIC_HOST=.*|PUBLIC_HOST=${WK_PUBLIC_HOST}|; s|^PUBLIC_URL=.*|PUBLIC_URL=https://${WK_PUBLIC_HOST}|" .env
 # shellcheck disable=SC1091
 set -a; . ./.env; set +a
 
