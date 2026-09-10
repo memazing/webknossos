@@ -5,8 +5,12 @@
 # access and no credentials on the build side. See the webknossos-update
 # systemd timer on webknossos-vm.
 #
-# The Scala + frontend build is heavy; E2_HIGHCPU_32 and a 2h timeout are
-# deliberate. Upstream's own CI runs the same sbt stage targets.
+# The Scala + frontend build is heavy. E2_HIGHCPU_32 would be the natural
+# choice, but this project has no Cloud Build quota for that machine type in
+# us-east1 -- builds fail at FAILED_PRECONDITION before they start, and no
+# build record is created, which reads as "the trigger never fired". Using
+# E2_HIGHCPU_8, which is what the connectomics service builds on. Timeouts
+# are raised to match the smaller machine; revisit if we get the quota.
 substitutions:
   _IMAGE: us-east1-docker.pkg.dev/the-pulsar-481518-f3/cloud-run-source-deploy/webknossos
 
@@ -22,7 +26,7 @@ steps:
       - -t
       - '${_IMAGE}:latest'
       - .
-    timeout: 5400s
+    timeout: 10800s
 
   - id: push
     name: gcr.io/cloud-builders/docker
@@ -34,7 +38,7 @@ images:
 
 options:
   logging: CLOUD_LOGGING_ONLY
-  machineType: E2_HIGHCPU_32
+  machineType: E2_HIGHCPU_8
   diskSizeGb: 200
 
-timeout: 7200s
+timeout: 14400s
