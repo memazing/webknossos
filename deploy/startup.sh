@@ -168,13 +168,19 @@ if [ "$ENABLE_OIDC" = "1" ]; then
   # ${OIDC_CLIENT_SECRET} stays literal here so compose resolves it from .env
   # at container-create time, exactly like the other secrets in this stack.
   #
+  # The trailing slash on providerUrl is required, not cosmetic:
+  # OpenIdConnectClient.scala builds the discovery URL as
+  # `baseUrl + ".well-known/openid-configuration"` with no separator, so
+  # without it the lookup goes to the host "accounts.google.com.well-known"
+  # and fails DNS resolution.
+  #
   # registerToDefaultOrgaEnabled=false removes the self-registration link, so
   # no new local accounts can be created and Google is the only way in. Note
   # it does NOT hide the email/password form itself: in 26.09.1 that form is
   # rendered unconditionally in login_form.tsx and no config flag gates it.
   # Existing local accounts, if any, keep working.
   sed -i "/-Dtracingstore.key=/a\\
-      - -DsingleSignOn.openIdConnect.providerUrl=https://accounts.google.com\\
+      - -DsingleSignOn.openIdConnect.providerUrl=https://accounts.google.com/\\
       - -DsingleSignOn.openIdConnect.clientId=${OIDC_CLIENT_ID}\\
       - -DsingleSignOn.openIdConnect.clientSecret=\${OIDC_CLIENT_SECRET}\\
       - -DsingleSignOn.openIdConnect.scope=openid profile email\\
