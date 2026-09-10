@@ -167,12 +167,19 @@ fi
 if [ "$ENABLE_OIDC" = "1" ]; then
   # ${OIDC_CLIENT_SECRET} stays literal here so compose resolves it from .env
   # at container-create time, exactly like the other secrets in this stack.
+  #
+  # registerToDefaultOrgaEnabled=false removes the self-registration link, so
+  # no new local accounts can be created and Google is the only way in. Note
+  # it does NOT hide the email/password form itself: in 26.09.1 that form is
+  # rendered unconditionally in login_form.tsx and no config flag gates it.
+  # Existing local accounts, if any, keep working.
   sed -i "/-Dtracingstore.key=/a\\
       - -DsingleSignOn.openIdConnect.providerUrl=https://accounts.google.com\\
       - -DsingleSignOn.openIdConnect.clientId=${OIDC_CLIENT_ID}\\
       - -DsingleSignOn.openIdConnect.clientSecret=\${OIDC_CLIENT_SECRET}\\
       - -DsingleSignOn.openIdConnect.scope=openid profile email\\
-      - -Dfeatures.openIdConnectEnabled=true" docker-compose.override.yml
+      - -Dfeatures.openIdConnectEnabled=true\\
+      - -Dfeatures.registerToDefaultOrgaEnabled=false" docker-compose.override.yml
   say "OIDC enabled for client ${OIDC_CLIENT_ID}"
 fi
 
